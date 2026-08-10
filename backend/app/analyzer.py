@@ -200,6 +200,7 @@ def analyze_repository(root: Path, owner: str, repo: str, url: str, branch: str)
     entries = entry_points(facts, contents_by_name)
     stack = detect_stack(root, set(contents_by_name), contents_by_name)
     architecture = architecture_map(facts, imports_by_file, stack)
+    repo_health = repository_health(facts, contents_by_name)
     summary = repo_summary(repo, stack, facts, routes)
     record_id = hashlib.sha256(f"{owner}/{repo}/{branch}".encode()).hexdigest()[:16]
     languages = {name: count for name, count in language_lines.most_common() if name != "Text"}
@@ -212,9 +213,95 @@ def analyze_repository(root: Path, owner: str, repo: str, url: str, branch: str)
         entry_points=entries,
         important_files=important,
         reading_order=reading_order(facts, entries),
-        routes=routes[:80], architecture=architecture, warnings=warnings,
+        routes=routes[:80], architecture=architecture, warnings=warnings, repo_health=repo_health,
         elapsed_ms=int((time.perf_counter() - started) * 1000), chunks=chunks,
     )
+
+
+def repository_health(facts: list[FileFact], contents: dict[str, str]) -> dict:
+    """Build a conservative, deterministic engineering-health snapshot."""
+    source_files = [fact for fact in facts if fact.language in SOURCE_LANGUAGES and fact.role != "Tests"]
+    test_files = [fact for fact in facts if fact.role == "Tests"]
+    readmes = [fact for fact in facts if Path(fact.path).name.lower().startswith("readme")]
+    docs = [fact for fact in facts if fact.path.lower().startswith("docs/") or fact.role == "Documentation"]
+    workflows = [fact for fact in facts if fact.path.lower().startswith(".github/workflows/")]
+    large_files = sorted((fact for fact in source_files if fact.lines >= 800), key=lambda fact: -fact.lines)
+    package = next((fact for fact in facts if fact.path == "package.json"), None)
+    package_text = contents.get("package.json", "")
+    runtime_pins = {".nvmrc", ".node-version", ".python-version", ".tool-versions"}
+    has_runtime_pin = any(fact.path in runtime_pins for fact in facts) or '"engines"' in package_text
+
+    test_ratio = len(test_files) / max(len(source_files), 1)
+    testing_score = 92 if test_ratio >= .12 else 62 if test_files else 25
+    documentation_score = 92 if readmes and len(docs) > len(readmes) else 78 if readmes else 25
+    automation_score = 90 if workflows else 48
+    maintainability_score = 35 if large_files and large_files[0].lines >= 1500 else 62 if large_files else 90
+    setup_score = 88 if has_runtime_pin else 55 if package else 75
+
+    categories = [
+        {"name": "Testing", "score": testing_score, "detail": f"{len(test_files)} test file{'s' if len(test_files) != 1 else ''} detected for {len(source_files)} source files."},
+        {"name": "Documentation", "score": documentation_score, "detail": "README and supporting documentation detected." if readmes else "No README was detected in the indexed repository."},
+        {"name": "Automation", "score": automation_score, "detail": f"{len(workflows)} continuous-integration workflow{'s' if len(workflows) != 1 else ''} detected." if workflows else "No continuous-integration workflow was detected."},
+        {"name": "Maintainability", "score": maintainability_score, "detail": f"{len(large_files)} source file{'s' if len(large_files) != 1 else ''} exceed 800 lines." if large_files else "No source files exceed the 800-line review threshold."},
+        {"name": "Setup", "score": setup_score, "detail": "A project runtime version is pinned." if has_runtime_pin else "The project runtime version is not pinned." if package else "No JavaScript runtime pin is required."},
+    ]
+
+    findings: list[dict] = []
+    if not test_files:
+        findings.append({
+            "id": "missing-tests", "severity": "warning", "title": "No automated tests detected",
+            "summary": "Changes cannot be checked against a repository-owned test suite.",
+            "explanation": "RepoLens did not find files in common test or specification locations. This increases regression risk and makes contributor feedback slower.",
+            "fix": ["Add one focused test around the most important user or API flow.", "Run that test in continuous integration.", "Document the test command in the README."],
+            "citations": [],
+        })
+    elif test_ratio < .12:
+        test = test_files[0]
+        findings.append({
+            "id": "thin-test-surface", "severity": "optional", "title": "Thin test surface",
+            "summary": f"Only {len(test_files)} test files cover {len(source_files)} source files.",
+            "explanation": "File counts are only a signal, but this repository may have important behaviors without focused regression coverage.",
+            "fix": ["Identify the highest-risk untested service or route.", "Add behavior-level tests before broad coverage work.", "Track coverage trends in CI rather than chasing a single percentage."],
+            "citations": [{"path": test.path, "start_line": 1, "end_line": min(test.lines, 20)}],
+        })
+    if not workflows:
+        findings.append({
+            "id": "missing-ci", "severity": "optional", "title": "No continuous integration detected",
+            "summary": "Repository checks may depend on contributors running commands manually.",
+            "explanation": "No workflow files were found under .github/workflows. Automated checks make contribution quality more consistent.",
+            "fix": ["Add a workflow for the existing test command.", "Include type checking or linting when those commands already exist.", "Require the workflow before merging changes."],
+            "citations": [],
+        })
+    if not readmes:
+        findings.append({
+            "id": "missing-readme", "severity": "warning", "title": "No README detected",
+            "summary": "New contributors have no obvious starting document.",
+            "explanation": "A concise README should explain the repository purpose, prerequisites, setup, and validation commands.",
+            "fix": ["Add a short purpose statement.", "Document the minimal setup and run commands.", "Include the test command and links to deeper documentation."],
+            "citations": [],
+        })
+    for index, fact in enumerate(large_files[:2]):
+        findings.append({
+            "id": f"large-file-{index}", "severity": "warning" if fact.lines >= 1500 else "optional", "title": f"Large {fact.role.lower()} file",
+            "summary": f"{fact.path} contains {fact.lines:,} lines and may combine several responsibilities.",
+            "explanation": "Large files are not automatically defective, but they increase navigation cost and make isolated changes harder to review and test.",
+            "fix": ["Identify cohesive responsibilities inside the file.", "Extract one boundary at a time while preserving behavior.", "Add focused tests before moving high-risk logic."],
+            "citations": [{"path": fact.path, "start_line": 1, "end_line": fact.lines}],
+        })
+    if package and not has_runtime_pin:
+        findings.append({
+            "id": "runtime-not-pinned", "severity": "warning", "title": "Runtime version is not pinned",
+            "summary": "Contributors may install dependencies with different Node.js versions.",
+            "explanation": "A pinned runtime reduces environment-specific installation, build, and test failures.",
+            "fix": ["Add engines.node to package.json.", "Commit a .nvmrc or .node-version file.", "Use the same version in continuous integration."],
+            "citations": [{"path": package.path, "start_line": 1, "end_line": min(package.lines, 40)}],
+        })
+
+    score = round(sum(category["score"] for category in categories) / len(categories))
+    label = "Healthy" if score >= 80 else "Needs attention" if score >= 60 else "At risk"
+    priority_count = sum(finding["severity"] == "warning" for finding in findings)
+    summary = f"{priority_count} priority finding{'s' if priority_count != 1 else ''} and {len(findings) - priority_count} improvement opportunit{'ies' if len(findings) - priority_count != 1 else 'y'} were identified from static repository evidence."
+    return {"score": score, "label": label, "summary": summary, "categories": categories, "findings": findings[:6]}
 
 
 def importance_score(path: str, role: str, imports: list[str], symbols: list[str], text: str) -> float:

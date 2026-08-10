@@ -72,3 +72,31 @@ function connectSocket(socket) {
     remove_socket = next(chunk for chunk in chunks if chunk.name == "removeSocket")
     assert "player.disconnected = true" in remove_socket.content
     assert remove_socket.end_line == 7
+
+
+def test_repository_health_flags_missing_safety_net(tmp_path: Path):
+    (tmp_path / "package.json").write_text('{"scripts":{"start":"node index.js"}}', encoding="utf-8")
+    (tmp_path / "index.js").write_text("export function start() { return true }", encoding="utf-8")
+
+    record = analyze_repository(tmp_path, "example", "health", "https://github.com/example/health", "main")
+
+    finding_ids = {finding["id"] for finding in record.repo_health["findings"]}
+    assert record.repo_health["score"] < 60
+    assert {"missing-tests", "missing-ci", "missing-readme", "runtime-not-pinned"}.issubset(finding_ids)
+
+
+def test_repository_health_rewards_documented_tested_automation(tmp_path: Path):
+    (tmp_path / "README.md").write_text("# Healthy project", encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"engines":{"node":"22"}}', encoding="utf-8")
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "test.yml").write_text("name: test", encoding="utf-8")
+    (tmp_path / "app.js").write_text("export function app() { return true }", encoding="utf-8")
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "app.test.js").write_text("export function testApp() { return true }", encoding="utf-8")
+
+    record = analyze_repository(tmp_path, "example", "healthy", "https://github.com/example/healthy", "main")
+
+    assert record.repo_health["score"] >= 80
+    assert record.repo_health["label"] == "Healthy"

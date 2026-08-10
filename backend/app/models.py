@@ -54,6 +54,7 @@ class AnalysisRecord:
     architecture: dict[str, list[dict[str, str]]]
     warnings: list[str]
     elapsed_ms: int
+    repo_health: dict[str, Any] = field(default_factory=lambda: {"score": 0, "label": "Unavailable", "summary": "Repository health was not evaluated.", "categories": [], "findings": []})
     github_activity: dict[str, Any] = field(default_factory=lambda: {"status": "unavailable", "issues": [], "pull_requests": [], "reason": "GitHub activity was not requested."})
     recent_work: dict[str, Any] = field(default_factory=lambda: {"status": "unavailable", "commits": [], "contributors": [], "reason": "Recent Git history was not requested."})
     chunks: list[CodeChunk] = field(default_factory=list, repr=False)

@@ -7,6 +7,8 @@ type RepoFile = { path: string; language: string; role: string; lines: number; s
 type ArchitectureNode = { id: string; label: string; kind: string; file: string };
 type ArchitectureEdge = { source: string; target: string; relation: string };
 type SetupIssue = { id: string; severity: "warning" | "optional"; title: string; summary: string; explanation: string; fix: string[]; citations: Citation[] };
+type RepoHealthCategory = { name: string; score: number; detail: string };
+type RepoHealth = { score: number; label: "Healthy" | "Needs attention" | "At risk" | "Unavailable"; summary: string; categories: RepoHealthCategory[]; findings: SetupIssue[] };
 type GitHubActivityItem = { number: number; kind: "issue" | "pull_request"; title: string; explanation: string; url: string; author: string; labels: string[]; updated_at: string; comments: number; draft: boolean };
 type GitHubActivity = { status: "available" | "unavailable"; issues: GitHubActivityItem[]; pull_requests: GitHubActivityItem[]; reason: string };
 type RecentWorkCommit = { sha: string; short_sha: string; title: string; author: string; date: string; areas: string[]; files: string[]; file_count: number; explanation: string; url: string };
@@ -27,6 +29,7 @@ type Analysis = {
   key_concepts?: { title: string; detail: string; citation: Citation }[];
   watchouts?: { title: string; detail: string }[];
   setup_issues?: SetupIssue[];
+  repo_health?: RepoHealth;
   github_activity?: GitHubActivity;
   recent_work?: RecentWork;
   run_steps?: string[];
@@ -136,6 +139,19 @@ const demo: Analysis = {
       citations: [{ path: "package.json", start_line: 6, end_line: 17 }, { path: "README.md", start_line: 160, end_line: 167 }],
     },
   ],
+  repo_health: {
+    score: 61,
+    label: "Needs attention",
+    summary: "3 priority findings and 2 improvement opportunities were identified from static repository evidence.",
+    categories: [
+      { name: "Testing", score: 62, detail: "Focused tests exist, but several central runtime paths remain concentrated in large files." },
+      { name: "Documentation", score: 92, detail: "README and supporting setup documentation detected." },
+      { name: "Automation", score: 48, detail: "No continuous-integration workflow was detected." },
+      { name: "Maintainability", score: 35, detail: "Two central source files exceed 1,500 lines." },
+      { name: "Setup", score: 68, detail: "Local setup works, but runtime and optional service modes need clearer enforcement." },
+    ],
+    findings: [],
+  },
   github_activity: {
     status: "unavailable",
     issues: [],
@@ -159,6 +175,7 @@ const demo: Analysis = {
   warnings: [], elapsed_ms: 3700,
 };
 demo.reading_order = demo.important_files;
+demo.repo_health!.findings = demo.setup_issues || [];
 
 const architectureLayers = [
   { id: "frontend", label: "Experience", description: "Browser and interface" },
@@ -193,6 +210,7 @@ export default function Home() {
   const [asking, setAsking] = useState(false);
   const [selected, setSelected] = useState<ArchitectureNode | null>(null);
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [selectedHealthId, setSelectedHealthId] = useState<string | null>(null);
   const [selectedActivityKey, setSelectedActivityKey] = useState<string | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
   const api = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -205,7 +223,7 @@ export default function Home() {
     e.preventDefault();
     const sourceValue = sourceMode === "github" ? url.trim() : localPath.trim();
     if (!sourceValue) return;
-    setLoading(true); setError(""); setAnalysis(null); setAnswer(null); setSelectedIssueId(null); setSelectedActivityKey(null); setSelectedCommitSha(null);
+    setLoading(true); setError(""); setAnalysis(null); setAnswer(null); setSelectedIssueId(null); setSelectedHealthId(null); setSelectedActivityKey(null); setSelectedCommitSha(null);
     try {
       const endpoint = sourceMode === "github" ? "/api/analyze" : "/api/analyze-local";
       const payload = sourceMode === "github" ? { url: sourceValue } : { path: sourceValue };
@@ -272,7 +290,7 @@ export default function Home() {
       {analysis && <section className="results">
         <header className="repo-header">
           <div><div className="repo-kicker"><Icon name="github" /> {analysis.repo.owner} / <span className="example-pill">Moodle example output</span></div><h2>{analysis.repo.name}</h2><p>{analysis.summary}</p></div>
-          <div className="repo-meta"><span><strong>{analysis.stats.files}</strong> files</span><span><strong>{analysis.stats.lines.toLocaleString()}</strong> lines</span><span><strong>{(analysis.elapsed_ms / 1000).toFixed(1)}s</strong> indexed</span></div>
+          <div className="repo-meta"><span><strong>{analysis.stats.files}</strong> files</span><span><strong>{analysis.stats.lines.toLocaleString()}</strong> lines</span><span><strong>{(analysis.elapsed_ms / 1000).toFixed(1)}s</strong> indexed</span>{analysis.repo_health && <a className="health-jump" href="#repo-health">Health {analysis.repo_health.score}/100 ↓</a>}</div>
         </header>
 
         <div className="results-grid">
@@ -309,8 +327,26 @@ export default function Home() {
               {selected && <div className="node-detail"><div><span>Selected evidence</span><strong>{selected.label}</strong></div><code>{selected.file}</code><div className="node-links">{analysis.architecture.edges.filter(edge => edge.source === selected.id || edge.target === selected.id).map((edge, i) => <small key={i}>{edge.source === selected.id ? "Uses" : "Used by"} {architectureNodeById[edge.source === selected.id ? edge.target : edge.source]?.label}</small>)}</div><button onClick={() => setSelected(null)}>Close</button></div>}
             </article>
 
+            {analysis.repo_health && <article className="panel health-panel" id="repo-health">
+              <div className="panel-heading"><div><span className="panel-index">04</span><h3>Repository health</h3></div><span className={`health-status health-${analysis.repo_health.label.toLowerCase().replaceAll(" ", "-")}`}>{analysis.repo_health.label}</span></div>
+              <div className="health-summary">
+                <div className="health-score" style={{ background: `conic-gradient(#5d50c8 ${analysis.repo_health.score}%, #e6e2dc 0)` }}><div><strong>{analysis.repo_health.score}</strong><span>/ 100</span></div></div>
+                <div><span className="health-kicker">Engineering X-ray</span><h4>{analysis.repo_health.label === "Healthy" ? "Strong foundations" : analysis.repo_health.label === "At risk" ? "Important gaps need attention" : "A solid base with clear improvements"}</h4><p>{analysis.repo_health.summary}</p></div>
+              </div>
+              <div className="health-categories">{analysis.repo_health.categories.map(category => <div className="health-category" key={category.name}><div><strong>{category.name}</strong><span>{category.score}</span></div><div className="health-meter"><i style={{ width: `${category.score}%` }} /></div><p>{category.detail}</p></div>)}</div>
+              <div className="health-findings-heading"><div><span>Prioritized findings</span><p>Select a finding to understand the evidence and the smallest useful fix.</p></div><b>{analysis.repo_health.findings.length}</b></div>
+              {analysis.repo_health.findings.length === 0 ? <div className="health-clear"><strong>No priority findings</strong><p>The current static checks did not identify a high-impact repository health concern.</p></div> : <div className="health-findings">{analysis.repo_health.findings.map(finding => {
+                const expanded = selectedHealthId === finding.id;
+                return <div className={`health-finding ${expanded ? "selected" : ""}`} key={finding.id}>
+                  <button type="button" aria-expanded={expanded} aria-controls={`health-detail-${finding.id}`} onClick={() => setSelectedHealthId(expanded ? null : finding.id)}><span className={`finding-level level-${finding.severity}`}>{finding.severity === "warning" ? "Priority" : "Improve"}</span><strong>{finding.title}</strong><p>{finding.summary}</p><small>{expanded ? "Close ↑" : "View recommendation →"}</small></button>
+                  {expanded && <div className="health-finding-detail" id={`health-detail-${finding.id}`}><div><span>Why it matters</span><p>{finding.explanation}</p></div><div><span>Recommended next steps</span><ol>{finding.fix.map((step, index) => <li key={step}><b>{index + 1}</b>{step}</li>)}</ol></div>{finding.citations.length > 0 && <div className="health-evidence"><span>Evidence</span>{finding.citations.map((citation, index) => <Citation key={index} citation={citation} />)}</div>}</div>}
+                </div>;
+              })}</div>}
+              <p className="health-note">Health scores are directional signals from repository structure—not a substitute for runtime testing or a security audit.</p>
+            </article>}
+
             {analysis.setup_issues && <article className="panel setup-panel">
-              <div className="panel-heading"><div><span className="panel-index">04</span><h3>Setup issues</h3></div><span className="readiness-status"><i /> Needs attention · {analysis.setup_issues.length} findings</span></div>
+              <div className="panel-heading"><div><span className="panel-index">05</span><h3>Setup issues</h3></div><span className="readiness-status"><i /> Needs attention · {analysis.setup_issues.length} findings</span></div>
               <p className="setup-intro">Select an issue to see why RepoLens flagged it, how it affects contributors, and the evidence-backed fix.</p>
               <div className="issue-grid">{analysis.setup_issues.map(issue => {
                 const expanded = selectedIssueId === issue.id;
@@ -326,7 +362,7 @@ export default function Home() {
             </article>}
 
             <article className="panel">
-              <div className="panel-heading"><div><span className="panel-index">05</span><h3>Ask the repository</h3></div><span className="confidence"><i /> Citation enforced</span></div>
+              <div className="panel-heading"><div><span className="panel-index">06</span><h3>Ask the repository</h3></div><span className="confidence"><i /> Citation enforced</span></div>
               <p className="ask-intro">Ask a question in plain language. RepoLens searches the codebase and answers with file-and-line evidence.</p>
               <form className="ask-form" onSubmit={ask}><textarea aria-label="Question about the repository" value={question} onChange={e => setQuestion(e.target.value)} placeholder="Ask anything about this codebase…" /><button disabled={asking || !question.trim()}>{asking ? "Searching…" : "Ask"} <Icon name="arrow" /></button></form>
               <div className="suggestion-block">
@@ -337,7 +373,7 @@ export default function Home() {
             </article>
 
             {analysis.github_activity && <article className="panel activity-panel">
-              <div className="panel-heading"><div><span className="panel-index">06</span><h3>GitHub issues & pull requests</h3></div>{analysis.github_activity.status === "available" && <span className="activity-counts"><b>{analysis.github_activity.issues.length}</b> issues · <b>{analysis.github_activity.pull_requests.length}</b> pull requests</span>}</div>
+              <div className="panel-heading"><div><span className="panel-index">07</span><h3>GitHub issues & pull requests</h3></div>{analysis.github_activity.status === "available" && <span className="activity-counts"><b>{analysis.github_activity.issues.length}</b> issues · <b>{analysis.github_activity.pull_requests.length}</b> pull requests</span>}</div>
               {analysis.github_activity.status === "unavailable" ? <div className="activity-unavailable"><span>GitHub activity unavailable</span><p>{analysis.github_activity.reason}</p><small>Repository analysis and Q&A continue to work without GitHub activity.</small></div> : githubActivityItems.length === 0 ? <div className="activity-unavailable activity-clear"><span>No open activity</span><p>This repository has no open GitHub issues or pull requests in the retrieved activity window.</p></div> : <>
                 <p className="activity-intro">Select an issue or pull request to read the author’s explanation and understand the active work around this repository.</p>
                 <div className="activity-list">{githubActivityItems.map(item => {
@@ -361,7 +397,7 @@ export default function Home() {
             </article>}
 
             {analysis.recent_work && <article className="panel recent-work-panel">
-              <div className="panel-heading"><div><span className="panel-index">07</span><h3>What people are working on</h3></div>{analysis.recent_work.status === "available" && <span className="activity-counts"><b>{analysis.recent_work.commits.length}</b> recent commits · <b>{analysis.recent_work.contributors.length}</b> contributor{analysis.recent_work.contributors.length === 1 ? "" : "s"}</span>}</div>
+              <div className="panel-heading"><div><span className="panel-index">08</span><h3>What people are working on</h3></div>{analysis.recent_work.status === "available" && <span className="activity-counts"><b>{analysis.recent_work.commits.length}</b> recent commits · <b>{analysis.recent_work.contributors.length}</b> contributor{analysis.recent_work.contributors.length === 1 ? "" : "s"}</span>}</div>
               {analysis.recent_work.status === "unavailable" ? <div className="activity-unavailable"><span>Recent work unavailable</span><p>{analysis.recent_work.reason}</p><small>RepoLens reads commit metadata and changed file paths; it never executes repository code.</small></div> : <>
                 <p className="activity-intro">RepoLens uses recent commit messages and changed files to summarize each contributor’s current areas of work.</p>
                 <div className="contributor-focus">{analysis.recent_work.contributors.map(contributor => <div key={contributor.name}><span>{contributor.name.slice(0, 1).toUpperCase()}</span><div><strong>{contributor.name}</strong><p>{contributor.summary}</p><small>{contributor.areas.join(" · ")}</small></div></div>)}</div>
@@ -382,11 +418,11 @@ export default function Home() {
           </div>
 
           <aside className="side-column">
-            <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">08</span><h3>Reading order</h3></div></div><ol className="reading-list">{analysis.reading_order.slice(0, 7).map((file, i) => <li key={file.path}><span>{String(i + 1).padStart(2, "0")}</span><div><code>{file.path}</code><p>{file.summary}</p></div></li>)}</ol></article>
-            {analysis.key_concepts && <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">09</span><h3>Key concepts</h3></div></div><div className="concept-list">{analysis.key_concepts.map(item => <div key={item.title}><strong>{item.title}</strong><p>{item.detail}</p><Citation citation={item.citation} /></div>)}</div></article>}
-            <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">10</span><h3>Interfaces & events</h3></div></div><div className="route-list">{analysis.routes.length ? analysis.routes.slice(0, 8).map((route, i) => <div key={i}><span className={`method method-${route.method.toLowerCase()}`}>{route.method}</span><div><code>{route.path}</code><small>{route.handler}</small></div></div>) : <p className="empty-state">No public interfaces detected.</p>}</div></article>
-            {analysis.watchouts && <article className="panel side-panel watchout-panel"><div className="panel-heading"><div><span className="panel-index">11</span><h3>Watch closely</h3></div></div><div className="watchout-list">{analysis.watchouts.map(item => <div key={item.title}><span>!</span><div><strong>{item.title}</strong><p>{item.detail}</p></div></div>)}</div></article>}
-            {analysis.run_steps && <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">12</span><h3>Run locally</h3></div></div><ol className="run-list">{analysis.run_steps.map((step, index) => <li key={step}><span>{index + 1}</span><code>{step}</code></li>)}</ol></article>}
+            <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">09</span><h3>Reading order</h3></div></div><ol className="reading-list">{analysis.reading_order.slice(0, 7).map((file, i) => <li key={file.path}><span>{String(i + 1).padStart(2, "0")}</span><div><code>{file.path}</code><p>{file.summary}</p></div></li>)}</ol></article>
+            {analysis.key_concepts && <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">10</span><h3>Key concepts</h3></div></div><div className="concept-list">{analysis.key_concepts.map(item => <div key={item.title}><strong>{item.title}</strong><p>{item.detail}</p><Citation citation={item.citation} /></div>)}</div></article>}
+            <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">11</span><h3>Interfaces & events</h3></div></div><div className="route-list">{analysis.routes.length ? analysis.routes.slice(0, 8).map((route, i) => <div key={i}><span className={`method method-${route.method.toLowerCase()}`}>{route.method}</span><div><code>{route.path}</code><small>{route.handler}</small></div></div>) : <p className="empty-state">No public interfaces detected.</p>}</div></article>
+            {analysis.watchouts && <article className="panel side-panel watchout-panel"><div className="panel-heading"><div><span className="panel-index">12</span><h3>Watch closely</h3></div></div><div className="watchout-list">{analysis.watchouts.map(item => <div key={item.title}><span>!</span><div><strong>{item.title}</strong><p>{item.detail}</p></div></div>)}</div></article>}
+            {analysis.run_steps && <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">13</span><h3>Run locally</h3></div></div><ol className="run-list">{analysis.run_steps.map((step, index) => <li key={step}><span>{index + 1}</span><code>{step}</code></li>)}</ol></article>}
             <article className="metric-card"><Icon name="clock" /><div><span>Indexed chunks</span><strong>{analysis.stats.indexed_chunks}</strong></div><p>Code-aware sections available to hybrid search.</p></article>
           </aside>
         </div>
