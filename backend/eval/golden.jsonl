@@ -1,0 +1,4 @@
+{"id":"auth-1","question":"Where is login handled?","expected_paths":["services/auth.py"],"fixture":"sample"}
+{"id":"billing-1","question":"How are invoices created?","expected_paths":["services/billing.py"],"fixture":"sample"}
+{"id":"health-1","question":"Which endpoint checks service health?","expected_paths":["routes/health.py"],"fixture":"sample"}
+

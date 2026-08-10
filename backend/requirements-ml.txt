@@ -1,0 +1,5 @@
+# Optional production retrieval stack. Install after requirements.txt and set
+# REPOLENS_ML_ENABLED=1. Models are downloaded from Hugging Face on first use.
+sentence-transformers==5.1.0
+faiss-cpu==1.11.0.post1
+

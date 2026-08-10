@@ -1,0 +1,1057 @@
+RepoLens Engineering Journal
+============================
+
+Project objective
+-----------------
+Build RepoLens, a production-oriented codebase intelligence system that accepts
+a public GitHub URL, safely indexes source code, detects repository structure,
+supports hybrid retrieval, and returns grounded explanations with file/line
+citations. The portfolio goal is to demonstrate more than a generic “chat with
+code” interface: static analysis, information retrieval, local inference,
+evaluation, observability, and regression testing should be visible in the
+implementation.
+
+Journal conventions
+-------------------
+Each entry records: the intended outcome, implementation decision, rationale,
+action taken, observed result, and follow-up. This is an engineering record, so
+it includes failed setup attempts and design tradeoffs. It records useful
+decision rationale and reproducible facts, not hidden model reasoning.
+
+2026-08-09 — Recovering the specification
+-----------------------------------------
+Intended outcome:
+  Locate the specification referenced by “my previous chat” before inventing
+  product requirements.
+
+Action:
+  Inspected the assigned workspace with file search, directory listing, and Git
+  status.
+
+Observed result:
+  The directory was empty except for a new .git directory. There were no source
+  files, requirements, or product notes. Git reported “No commits yet on
+  master.”
+
+Decision and rationale:
+  Search recent Codex tasks because the user explicitly referenced a previous
+  chat and the current workspace contained no specification. This is preferable
+  to asking the user to repeat a long brief when the application can retrieve
+  the relevant prior conversation.
+
+Action:
+  Listed recent tasks and inspected the immediately preceding task associated
+  with the same project context.
+
+Observed result:
+  Recovered the full RepoLens brief. The essential requirements are:
+  - public GitHub URL ingestion;
+  - safe clone and filtering of dependencies, binaries, generated files,
+    oversized files, secrets, and unsafe symlinks;
+  - framework/language/entry-point detection;
+  - code-aware chunks based on files, functions, and classes;
+  - hybrid BM25 plus semantic/vector retrieval;
+  - reranking of candidate chunks;
+  - optional local Ollama coding model;
+  - exact file and line citations;
+  - explicit refusal when evidence is insufficient;
+  - architecture map and reading-order UI;
+  - golden evaluation dataset, retrieval/faithfulness metrics, CI regression
+    gates, latency measurements, and observability.
+
+Architecture direction selected:
+  Frontend: React + TypeScript using the initialized vinext/Next-compatible
+  structure.
+  Backend: FastAPI and Python.
+  Metadata: SQLite.
+  Parsing: Python AST plus deterministic regex-based extraction for additional
+  languages in the initial version.
+  Retrieval: local BM25 plus deterministic vector features, with an optional
+  sentence-transformer/cross-encoder enhancement when installed.
+  Generation: Ollama when available; extractive grounded fallback otherwise.
+
+Rationale:
+  Static analysis should establish facts and citations; the language model
+  should only explain retrieved facts. The system remains usable without a paid
+  API and degrades gracefully when Ollama or optional ML packages are absent.
+
+2026-08-09 — Web project initialization
+---------------------------------------
+Intended outcome:
+  Initialize the supported website runtime in the empty repository before
+  implementing the interface.
+
+Action:
+  Ran the Sites initializer against the workspace.
+
+Observed result:
+  The initializer created the application structure, package manifest, lockfile,
+  starter page, worker, database examples, tests, and most of node_modules.
+  Near the end, npm failed with:
+
+    “Exit handler never called!”
+
+  It also could not write npm logs beneath the user-level npm cache due to the
+  restricted workspace environment.
+
+Diagnosis:
+  This was an npm/install-environment failure rather than a source-code failure.
+  Evidence: the scaffold and a large node_modules tree existed, but the vinext
+  executable was absent.
+
+Recovery attempt 1:
+  Ran the development command to test whether installation was complete.
+
+Result:
+  Failed with “vinext: command not found,” confirming an incomplete dependency
+  installation.
+
+Recovery attempt 2:
+  Re-ran npm install with a cache under /tmp/repolens-npm-cache, a writable
+  location, to avoid the user-cache permission problem. The install is being
+  monitored; final status will be recorded below.
+
+2026-08-09 — Product interface implementation
+----------------------------------------------
+Intended outcome:
+  Replace the generic starter with a distinctive, credible RepoLens product UI
+  that exposes the actual backend capabilities.
+
+Design direction:
+  Editorial technical aesthetic: warm paper background, near-black ink,
+  restrained violet accent, serif display headlines, monospace evidence labels,
+  and compact structured panels. This avoids the common generic neon/gradient
+  “AI dashboard” appearance and makes citations visually prominent.
+
+Implemented interface states:
+  - initial URL analysis screen;
+  - trust/safety claims visible near the primary action;
+  - repository analysis progress state;
+  - clear backend connection error with an interactive demo fallback;
+  - repository purpose, file/line counts, language distribution, and stack;
+  - detected entry points with file/line citations;
+  - clickable architecture nodes and evidence paths;
+  - cited repository question form;
+  - recommended reading order;
+  - detected API routes;
+  - indexed-chunk metric;
+  - responsive layouts for narrow screens.
+
+Interaction/API contract selected:
+  POST /api/analyze with { url }
+  POST /api/repos/{analysis_id}/ask with { question }
+
+The frontend reads NEXT_PUBLIC_API_URL and defaults to
+http://127.0.0.1:8000 for local development.
+
+Important design constraint:
+  The demo data is explicitly used only after the user selects “Explore the
+  interactive demo” or chooses the demo fallback after a connection error. It
+  does not pretend that a real repository was analyzed.
+
+Next implementation steps
+-------------------------
+1. Complete and verify dependency installation.
+2. Implement the safe Git ingestion and file policy.
+3. Implement deterministic parsing, importance scoring, entry-point and route
+   detection, architecture edges, and code-aware chunks.
+4. Implement SQLite persistence, hybrid retrieval, reranking, grounded answers,
+   refusal behavior, and optional Ollama generation.
+5. Add unit and integration tests, evaluation dataset format, benchmark command,
+   CI quality gate, documentation, and sample environment file.
+6. Run frontend build, backend tests, and a local end-to-end smoke test.
+7. Record every result and any corrective work in this journal.
+
+2026-08-09 — Dependency recovery and environment isolation
+-----------------------------------------------------------
+Frontend installation, continued:
+  The second npm attempt used a writable /tmp cache but still failed. Inspection
+  of npm's detailed log showed repeated ENOTFOUND failures for registry.npmjs.org
+  followed by npm's misleading terminal “Exit handler never called” error. The
+  root cause was restricted outbound network access, not an incompatible Node
+  version (Node v25.2.1 and npm v11.6.3 were detected).
+
+Recovery attempt 3:
+  Re-ran installation with explicit network approval.
+
+Result:
+  npm reached the registry but failed with ENOTEMPTY while renaming the existing
+  partial node_modules/acorn directory. This was consistent with two interrupted
+  installations leaving an inconsistent dependency tree.
+
+Recovery attempt 4:
+  Preserved the incomplete dependency directory by moving it to
+  /tmp/repolens-node-modules-incomplete instead of deleting it. Then ran a clean
+  npm ci using the lockfile and approved network access.
+
+Result:
+  Success: 509 packages installed. npm reported 21 dependency advisories (1 low,
+  4 moderate, 16 high). These are being audited separately; no automatic
+  force-upgrade was applied because it could introduce breaking dependency
+  changes without understanding whether the advisories affect the production
+  bundle.
+
+Backend environment:
+  The system Python and the bundled workspace Python did not include pytest.
+  Created a repository-local .venv and installed the pinned dependencies from
+  backend/requirements.txt. This isolates the project from system Python and
+  makes validation reproducible.
+
+2026-08-09 — Backend implementation
+-----------------------------------
+Safe ingestion:
+  Implemented strict canonical GitHub HTTPS URL parsing. Embedded credentials,
+  query strings, fragments, ports, alternate hosts, and non-root repository
+  paths are rejected. GitHub DNS is checked against private, loopback,
+  link-local, and reserved address ranges as an SSRF defense. Cloning is shallow,
+  single-branch, blob-filtered, no-tag, time-limited, and performed in a temporary
+  directory that is removed afterward. The repository's code is never executed.
+
+File policy:
+  Added limits of 4,000 files, 35 MB total indexed text, and 750 KB per file.
+  Dependencies, build output, virtual environments, caches, binaries, media,
+  lockfiles, credential-like filenames, and symlinks are excluded. Files must
+  resolve inside the temporary clone and decode as UTF-8.
+
+Static analysis:
+  Added language detection for common backend, frontend, systems, data, and
+  configuration formats. Python uses the standard-library AST to extract
+  imports, classes, functions, and exact line ranges. Other languages use a
+  deterministic structural splitter around common declaration forms, with
+  bounded file-section chunks as coverage fallback.
+
+  Added deterministic extraction for:
+  - imports and module dependencies;
+  - functions/classes/interfaces and other symbols;
+  - FastAPI/Flask-style decorators and Express-style HTTP routes;
+  - entry-point conventions and executable markers;
+  - framework/technology signals from manifests;
+  - file roles such as interface, route, service, model, authentication, test,
+    configuration, and documentation;
+  - file importance based on role, entry-point markers, manifests, symbols,
+    imports, inbound references, and test penalties;
+  - recommended reading order and an evidence-linked architecture map.
+
+Retrieval decision:
+  Implemented a zero-dependency hybrid retriever. One ranking uses BM25 term
+  statistics. The second uses normalized hashed token vectors as a deterministic
+  local semantic proxy. Reciprocal-rank fusion combines both lists, then path and
+  symbol overlap provide a lightweight reranking signal.
+
+Tradeoff:
+  Hashed vectors do not provide the semantic quality of a transformer embedding
+  model or a learned cross-encoder. They make the baseline fast, offline, and
+  testable on any laptop. The interfaces are intentionally isolated so a
+  sentence-transformer embedding model and cross-encoder can replace the local
+  proxy in the next production phase without changing the API.
+
+Full ML retrieval path added during final scope review:
+  A review against the original brief identified that leaving learned retrieval
+  only as a future interface would undersatisfy the explicit embedding/FAISS and
+  cross-encoder requirements. Added an optional production path using
+  sentence-transformers/all-MiniLM-L6-v2 embeddings, a FAISS inner-product index
+  over normalized vectors, and cross-encoder/ms-marco-MiniLM-L-6-v2 reranking.
+  Set REPOLENS_ML_ENABLED=1 after installing backend/requirements-ml.txt to use
+  this path. The models download from Hugging Face on first use.
+
+  The dependency-free BM25 + hashed-vector path remains the default because it
+  starts instantly, works offline, and keeps CI deterministic. This is explicit
+  in the interface, README, environment example, and code; benchmark claims must
+  name which retrieval configuration produced them.
+
+Determinism correction found by repeated evaluation:
+  A subsequent evaluation run produced the same perfect Recall@3 but MRR fell
+  from 1.0 to 0.667. Investigation found that the fallback vectorizer used
+  Python's built-in hash(), whose per-process random seed can change vector
+  collisions and therefore ranking order. Replaced it with a stable BLAKE2b
+  token digest mapped into 384 dimensions. This makes CI comparisons meaningful
+  across processes and machines rather than merely repeatable within one process.
+
+Grounded answer policy:
+  The service retrieves evidence before generation. If retrieval confidence is
+  below a threshold, it returns the exact refusal required by the specification.
+  When Ollama is reachable, the prompt forbids unsupported claims and invented
+  citations. If Ollama is missing, times out, or produces an answer without a
+  citation marker, RepoLens returns a deterministic extractive answer from the
+  top code chunks. This makes missing local-model infrastructure a graceful
+  degradation rather than a product failure.
+
+Persistence and observability:
+  SQLite stores the full analysis/chunk payload. Each question stores retrieved
+  file/line ranges and scores, latency, and whether it answered or refused. WAL
+  mode supports safer concurrent local reads/writes.
+
+2026-08-09 — Tests, evaluation, and CI
+-------------------------------------
+Added tests for:
+  - route, symbol, entry-point, and citation extraction;
+  - exclusion of .env and node_modules content;
+  - hybrid retrieval ranking;
+  - empty-index behavior;
+  - strict GitHub URL acceptance/rejection.
+
+Added a small golden JSONL dataset and evaluation CLI that reports Recall@3 and
+mean reciprocal rank. The included three-case fixture is a pipeline regression
+test, not a portfolio-quality benchmark. The README explicitly instructs that
+50–100 questions across known repositories are needed before publishing quality
+claims.
+
+Added GitHub Actions checks for Python tests, retrieval evaluation with an 0.80
+Recall@3 gate, and the production frontend build.
+
+Validation results:
+  Python tests: 9 passed in 0.04 seconds.
+  Retrieval fixture: Recall@3 = 1.0; MRR = 1.0; 3 cases.
+  Frontend production build: successful across client, server-reference, RSC,
+  client, and SSR build phases. The single application route was produced.
+
+2026-08-09 — Local end-to-end smoke test
+---------------------------------------
+First backend start attempt:
+  Uvicorn initialized the application but the restricted process environment
+  denied binding to 127.0.0.1:8000 (“operation not permitted”).
+
+Recovery:
+  Re-ran the same narrowly scoped local server command with permission to bind
+  the port. The service started successfully.
+
+Health check:
+  GET /api/health returned {"status":"ok"}.
+
+Real repository analysis:
+  POSTed https://github.com/octocat/Hello-World to /api/analyze. RepoLens safely
+  cloned and removed the repository, detected its master branch, indexed its
+  README, returned a cited entry point, built one code-aware section, and
+  persisted analysis ID 1a30d694631ea70a. Static analysis took 6 ms after clone.
+
+Real Q&A:
+  Asked “What does this repository say?” through the stored analysis endpoint.
+  Ollama was not required. The extractive fallback answered from README:1 and
+  returned the same citation. Retrieval/generation latency was 14 ms.
+
+Frontend preview:
+  The development server started at http://localhost:3001 because port 3000 was
+  already occupied. The application was opened in the Codex preview panel. The
+  production build later succeeded while the development server remained live.
+
+Repository hygiene:
+  Added .venv and backend/data to .gitignore because they are machine-generated
+  local state. Explicitly allowed .env.example even though real .env files remain
+  ignored.
+
+2026-08-09 — Security audit and final validation
+------------------------------------------------
+Production dependency audit:
+  An online npm audit initially found four production dependency findings. The
+  direct cause was Next.js 16.2.6 from the generated starter; the audit named
+  16.3.0 as the non-major patched release. Associated transitive findings
+  included nanoid, PostCSS, and sharp.
+
+Corrective action:
+  Upgraded Next.js from 16.2.6 to 16.3.0, regenerated the lockfile, and repeated
+  the production-only audit.
+
+Result:
+  Production audit: 0 known vulnerabilities across 19 production dependencies.
+  npm still reports advisories when development dependencies are included. They
+  originate in the generated build/tooling graph and are not shipped as the
+  production dependency set. No unsafe force-upgrade was used.
+
+Local integration correction:
+  The frontend selected port 3001 because port 3000 was occupied. The first CORS
+  policy listed only ports 3000 and 5173, which would have blocked browser calls
+  from the actual preview. Replaced the port list with a strict regex permitting
+  localhost or 127.0.0.1 on any numeric development port. It still excludes
+  non-local origins and allows only GET/POST with the Content-Type header.
+  The browser's earlier OPTIONS request had returned HTTP 400, confirming the
+  problem was real rather than theoretical. After restarting the API with the
+  corrected policy, a preflight from http://localhost:3001 returned HTTP 200 and
+  access-control-allow-origin: http://localhost:3001.
+
+Final validation after dependency and code changes:
+  - frontend production build: passed;
+  - ESLint: passed with zero findings;
+  - backend tests: 9 passed in 0.05 seconds;
+  - retrieval evaluation after stable-hash correction: Recall@3 1.0, MRR 0.833,
+    3 fixture cases, reproduced in two separate Python processes;
+  - whitespace/error-marker check: passed;
+  - production npm audit: 0 vulnerabilities.
+
+2026-08-09 — Live browser verification and credential-prompt fix
+----------------------------------------------------------------
+Question under test:
+  “Does it work?” The existing browser form contained
+  https://github.com/Sanjana-Gondariya/Moodle.git, so the live test used that
+  exact repository first rather than substituting an easier fixture.
+
+Observed UI state before retest:
+  The page rendered correctly, but showed “Analysis couldn’t start — Failed to
+  fetch.” The backend health endpoint was reachable when checked in the same
+  network context as its running process. Reloading the frontend cleared the
+  stale error, and CORS preflight returned HTTP 200.
+
+Failure found:
+  Submitting the Moodle URL moved the interface into its expected indexing state
+  but never completed. Backend output showed Git asking for a GitHub username.
+  The repository is private, unavailable, or nonexistent from the unauthenticated
+  public clone surface. Because subprocess stdin was inherited, Git waited for
+  credentials instead of failing immediately. This is both a reliability issue
+  and a violation of RepoLens's public-repository-only product boundary.
+
+Corrective action:
+  Changed safe cloning to:
+  - connect stdin to DEVNULL;
+  - set GIT_TERMINAL_PROMPT=0;
+  - set GCM_INTERACTIVE=never;
+  - clear GIT_ASKPASS;
+  - disable Git credential helpers for the clone command;
+  - translate authentication/not-found errors into a clear message explaining
+    that RepoLens accepts public repositories only.
+
+Regression coverage:
+  Added a test that simulates an authentication failure, asserts that all
+  non-interactive controls are passed to Git, and verifies the safe public-only
+  error returned to the caller.
+
+Verification after the fix:
+  - backend suite: 10 tests passed in 0.03 seconds;
+  - retrieval gate: Recall@3 1.0 and MRR 0.833;
+  - the same unavailable Moodle URL returned the intended user-facing message
+    immediately instead of prompting or hanging;
+  - analyzed the known public repository octocat/Hello-World through the actual
+    browser UI;
+  - the result screen identified the owner/repository and master branch data,
+    indexed one file/two lines/one chunk, produced a repository overview,
+    reading order, architecture node, and README:1-2 evidence citation;
+  - asked “What does this repository contain?” through the browser UI;
+  - received a grounded extractive answer citing README:1;
+  - browser console check returned zero warnings or errors.
+
+Conclusion of live verification:
+  The public-repository analysis and citation-backed Q&A path works end to end.
+  The exact Moodle repository entered by the user cannot be analyzed through the
+  current product because it is not publicly cloneable. Private-repository
+  authentication remains intentionally out of scope for this release.
+
+2026-08-09 — User-reported private repository usability gap
+-----------------------------------------------------------
+User evidence:
+  The supplied screenshot showed the application running at localhost:3001 and
+  correctly returning the public-only message for
+  Sanjana-Gondariya/Moodle. The user nevertheless reported that the product did
+  not work for them, meaning the public-only boundary failed their real workflow
+  even though the error handling was technically correct.
+
+Investigation:
+  - GitHub's public search/index did not expose that owner/repository pair.
+  - Local GitHub CLI status showed account Shreyakb301 with an expired token.
+  - A local checkout exists at /Users/shreyakb/Moodle.
+  - Its origin is the exact private/unavailable URL entered in RepoLens.
+
+Product decision:
+  Do not ask the user to paste a personal access token into the browser. Add a
+  local-checkout source mode instead. This aligns with the local-first product,
+  works while GitHub authentication is expired, and keeps private code on the
+  machine.
+
+Implementation:
+  Added a GitHub URL / Local folder selector to the main form and a direct “Use
+  local checkout” recovery action on public clone errors. Added
+  POST /api/analyze-local, local Git-root validation, configurable allowed roots
+  through REPOLENS_LOCAL_ROOTS, branch and remote metadata extraction, and the
+  same filtering/parsing/retrieval pipeline used for cloned repositories.
+
+First local Moodle analysis:
+  The new mode completed successfully against /Users/shreyakb/Moodle in about
+  21 seconds, but reported 1,648 files, 918,227 lines, and 27,712 chunks. The
+  reading order included .asl-python packages such as fontTools and absl. That
+  directory is a project-specific Python dependency environment, not application
+  source, so the output was technically complete but semantically polluted.
+
+Correction:
+  Added .asl-python and site-packages to the ignored dependency directories,
+  added regression coverage, and changed the source copy/trust label to make the
+  local-checkout behavior explicit.
+
+Broad-question retrieval correction:
+  The cleaned Moodle Q&A path worked and returned valid file/line citations, but
+  “What does this project do?” ranked small implementation symbols above the
+  README. The answer cited sketchRnn.js and drawing lifecycle types instead of
+  the repository's explicit purpose statement. Added a query-intent signal for
+  project purpose/overview questions that boosts README chunks during fusion.
+  The extractive fallback now turns the first substantive README paragraphs into
+  a concise description and keeps citations aligned with the three statements
+  actually shown. Added a regression test for README-first overview retrieval.
+
+Second retrieval correction:
+  The first README boost only affected chunks already present in the top-20
+  BM25/vector candidate union. In a 3,710-chunk repository, README was absent
+  from that union, so the boost never ran. Changed overview routing to inject
+  README chunks into the fused candidate map before reranking. Expanded the test
+  with 30 distracting project-related chunks to reproduce the large-index case.
+
+Final answer-quality verification:
+  After candidate injection, the live Moodle question returned the actual README
+  description: a browser-based real-time drawing and guessing game combining a
+  React canvas with a Node.js game server, with synchronized rooms, strokes,
+  chat, timers, words, scores, human players, and AI players. The initial output
+  also summarized later README sections, so the extractive fallback now stops
+  after the highest-ranked README evidence block for a tighter overview.
+  Citation output was also reduced to that single README range so displayed
+  evidence exactly matches the answer rather than showing unused later chunks.
+
+Final private/local workflow result:
+  - analyzed /Users/shreyakb/Moodle in 4.0 seconds after dependency filtering;
+  - indexed 166 project files, 69,060 lines, and 3,710 code-aware chunks;
+  - detected React, TypeScript, Docker, server/index.js, interface modules, and
+    the README-first reading order;
+  - live overview Q&A returned the correct drawing-game description with exactly
+    one matching citation, README.md:1-120;
+  - backend regression suite: 13 tests passed in 0.04 seconds;
+  - frontend production build and ESLint: passed.
+
+2026-08-09 — Automatic fallback after second user report
+--------------------------------------------------------
+The second screenshot showed that the user reasonably stayed on the GitHub URL
+tab and pressed Analyze again. Although a “Use local checkout” action existed,
+requiring the user to understand the private/public failure and manually change
+source modes was poor recovery design.
+
+Changed POST /api/analyze so that after a public clone failure it searches the
+configured local roots for a Git checkout with the same repository name and an
+exactly matching GitHub origin. The search is bounded to the root and three
+directory levels, validates the exact normalized remote, and then reuses the
+safe local analysis pipeline. A warning records that local fallback occurred.
+The original GitHub URL and Analyze button therefore work without a manual tab
+switch whenever a matching checkout exists. Added regression coverage for the
+private-URL-to-local-checkout resolution.
+
+Exact-flow verification:
+  Reloaded the application, stayed on GitHub URL, pasted exactly
+  https://github.com/Sanjana-Gondariya/Moodle, and pressed the same Analyze
+  repository button shown in the user's screenshot. The request automatically
+  resolved /Users/shreyakb/Moodle and returned the full result screen in 3.7
+  seconds: 166 files, 69,060 lines, 3,710 chunks, detected React/TypeScript/
+  Docker, README-first reading order, server/index.js entry point, and source
+  citations. No browser warnings or errors were recorded. Backend suite: 14
+  tests passed in 0.05 seconds; frontend production build and ESLint passed.
+
+2026-08-09 — User-requested project startup
+-------------------------------------------
+Both prior development processes had ended between conversation turns. Restarted
+the FastAPI backend with local-root access for /Users/shreyakb and restarted the
+vinext frontend. The backend reported successful startup on 127.0.0.1:8000 and
+its health endpoint returned {"status":"ok"}. The frontend selected port 3000
+and served GET / with HTTP 200. Opened the new http://localhost:3000/ preview in
+Codex; the older localhost:3001 URL is no longer the active instance.
+
+2026-08-09 — Repository-specific architecture diagram
+-------------------------------------------------------
+User request:
+  Upgrade the product so it builds the architecture diagram rather than showing
+  only a basic sequence of generic role nodes.
+
+Design decision:
+  Build the diagram from static evidence already collected by RepoLens. Modules
+  are classified into Experience, Transport, Application, Data, Intelligence,
+  and Supporting layers using file roles, paths, entry-point conventions, and
+  technology-specific names. Up to two high-signal files represent each layer.
+  Relationships are emitted only when selected modules have a matching import;
+  a frontend/server socket connection is emitted when the frontend imports
+  socket.io-client and the server imports socket.io.
+
+Interface implementation:
+  Replaced the horizontal generic node row with a layered architecture diagram.
+  Each lane has its own semantic color, label, description, and repository file
+  nodes. Directional arrows show architectural progression. A separate verified
+  relationships area names source, target, and relation. Selecting a node shows
+  its exact evidence file plus incoming/outgoing relationships. The diagram
+  becomes a vertical flow on mobile without using an authored SVG.
+
+Regression coverage:
+  Added a representative React + Socket.IO + data-store fixture and assertions
+  that the output contains frontend, API, and data layers plus both import and
+  socket-connection edges.
+
+Validation:
+  - backend tests: 15 passed in 0.08 seconds;
+  - frontend production build: passed;
+  - ESLint and whitespace checks: passed;
+  - regenerated the real Moodle analysis through POST /api/analyze;
+  - diagram output: 10 repository-specific nodes and 10 verified links;
+  - nodes include React application, Toolbar, Game server, Room Store, Game Data
+    Store, DB, Redis, AI Worker, AI Worker Pool, and Drawing types;
+  - relationships include real import edges plus the evidence-derived Socket.IO
+  connection from the React application to the game server.
+
+2026-08-09 — Moodle-first output design
+---------------------------------------
+User direction:
+  Stop treating repository ingestion as the immediate design problem and use
+  Moodle as the fixed example for deciding what a useful RepoLens output should
+  contain.
+
+Design response:
+  Replaced the generic RepoLens demo with the actual Moodle project and made it
+  the initial result shown on page load. The example uses measured repository
+  statistics and real source citations. It now defines the proposed output
+  contract:
+  1. plain-language project purpose;
+  2. technology and language profile;
+  3. browser and server entry points;
+  4. end-to-end system flow with citations at every step;
+  5. layered architecture diagram and verified relationships;
+  6. key concepts a new contributor must understand;
+  7. recommended reading order;
+  8. HTTP, Socket.IO, or other public interfaces/events;
+  9. potentially confusing or risky areas;
+  10. local run instructions;
+  11. repository Q&A with source citations.
+
+Moodle-specific content:
+  The example explains player input, the room_message Socket.IO envelope, server
+  game orchestration, live Room Store/Redis state, durable Game Data Store/
+  database history, and the AI worker boundary. It calls out the large server
+  and client coordinator files and optional-infrastructure branches as areas to
+  approach carefully. The compact hero and “Moodle example output” marker make
+  clear that this screen is currently a design reference.
+
+2026-08-09 — Repository Q&A examples
+-------------------------------------
+User request:
+  Add an explicit “You could ask questions like” area to Ask the repository,
+  using questions about authentication, request-to-database flow, adding API
+  endpoints, and the files a new contributor should understand.
+
+Design reasoning:
+  Kept the examples inside the existing Q&A panel so they explain the input at
+  the moment a user needs help. Presented all four as full-width, readable
+  prompt cards rather than tiny tags because these are substantial questions,
+  not short filters. Each card is a real button that copies its question into
+  the text area, allowing the user to edit before submitting. Added a one-line
+  explanation that answers are grounded in file-and-line evidence. On narrow
+  screens the two-column prompt grid becomes one column.
+
+Validation:
+  The production frontend build passed, ESLint passed, and the whitespace diff
+  check passed. No implementation retry was needed.
+
+2026-08-09 — Q&A relevance failure shown in screenshot
+-------------------------------------------------------
+Observed failure:
+  The authentication example returned unrelated symbols from aiGuessEval.js,
+  gameDataStore.js, and gestureDetection.ts. The answer repeated “strongest
+  evidence” three times even though none of those snippets described auth.
+
+Root cause:
+  Reciprocal-rank fusion assigned a positive rank score to every top candidate,
+  including documents whose BM25 score was exactly zero. The offline hashed
+  vector fallback could also collide unrelated words into the same numeric
+  dimension. The final 0.006 evidence threshold therefore measured ranking
+  position rather than actual topical support and allowed fabricated relevance.
+
+Fix design:
+  Added conservative code-domain query expansion for authentication, databases,
+  API endpoints, and contributor-orientation questions. Removed filler words
+  from queries. Zero-score BM25 candidates are now discarded, and the offline
+  hashed-vector fallback may rank only documents sharing a meaningful original
+  or expanded concept term. When an authentication question has no credible
+  evidence, RepoLens now explicitly says it found no auth flow, routes,
+  middleware, session/token handling, or login implementation, with no fake
+  citations. Traces treat any answer without citations as a refusal.
+
+Regression coverage added:
+  1. the exact three unrelated screenshot-style chunks return no evidence for
+     “Where does authentication happen?”;
+  2. database questions expand to persistence/storage vocabulary and retrieve
+     the data store;
+  3. missing authentication evidence produces an honest, citation-free answer.
+
+Exact Moodle verification exposed a second, subtler case:
+  After restarting the API, the exact question no longer returned the three
+  original random symbols, but it did find `socket.handshake.auth` plus Bearer
+  headers used by outbound AI providers. A generic extractive summary still
+  called all three “strongest evidence.” The first filter fixed random hash
+  collisions, but lexical relevance alone could not distinguish application
+  login from Socket.IO connection metadata or provider API credentials.
+
+Second fix:
+  For authentication questions, README evidence about whether player accounts
+  exist and direct `socket.handshake.auth` evidence are deliberately promoted.
+  When both facts are present, a deterministic evidence-grounded explanation
+  states that the repository has no account-based login, then separately
+  explains that Socket.IO auth carries room/reconnect connection metadata. It
+  does not mislabel outbound provider Bearer tokens as player authentication.
+  Added a regression test for this exact account-free Socket.IO architecture.
+
+Service restart attempt and final verification:
+  The first attempt to stop process 7499 was rejected by the workspace sandbox,
+  and a replacement process could not bind while the old API still owned port
+  8000. Retried the narrowly scoped stop/start with approved local-process
+  access, then restarted uvicorn successfully. The first exact API check after
+  the initial filter revealed the lexical ambiguity described above; after the
+  second fix, restarted once more and repeated the same POST request.
+
+  Final exact answer:
+  “This repository does not implement account-based login authentication;
+  players can join without accounts [README.md:1-120]. The server does read
+  socket.handshake.auth when a Socket.IO client connects
+  [server/index.js:4662-4662], but that is room/reconnect connection
+  metadata—not a user login or authorization system.”
+
+  Final validation: 19 backend tests passed. The running API returned exactly
+  two relevant citations and no aiGuessEval.js, gameDataStore.js, gesture code,
+  or outbound AI-provider citations in the answer.
+
+2026-08-09 — Multi-question self-test, first pass
+-------------------------------------------------
+Test set:
+  Ran ten questions through the real persisted Moodle analysis: the four UI
+  suggestions, project purpose, drawing client/server flow, room persistence,
+  disconnect behavior, scoring, and an intentionally unsupported subscription-
+  payment question.
+
+First-pass results:
+  Authentication and project purpose passed. The other eight failed quality
+  review. Examples included local pinch-calibration code for database flow,
+  a QuickDraw download script for API endpoints, author names for contributor
+  orientation, Redis variable declarations for drawing transport, and hand-
+  tracking types for nonexistent subscription payments. This confirmed the
+  prior auth-specific repair was correct but too narrow.
+
+Additional diagnosis:
+  Ollama is installed and has `mistral-nemo:12b`, but RepoLens hard-coded
+  `qwen2.5-coder:7b`, which is not installed. Every question therefore dropped
+  into the weak extractive fallback. Even a working generator would still have
+  received poor context for several intent types.
+
+Second-pass design:
+  Added structural intent boosts for database boundaries, HTTP request routing,
+  contributor entry files, Socket.IO drawing messages, room snapshots and
+  reconnects, disconnect cleanup, and scoring functions. Test files are
+  slightly demoted and final context is diversified across files. Added a
+  payment-domain vocabulary so unsupported billing questions can refuse rather
+  than collide with drawing types. RepoLens now queries Ollama's local model
+  inventory and uses the configured model when available, otherwise the first
+  installed model. Generated inline citations are accepted only when their
+  exact path and line range match a retrieved source.
+
+Second-pass execution result and third iteration:
+  The installed 12B model exceeded the original 45-second generation timeout on
+  the database, endpoint, and contributor questions, so those requests still
+  fell back to generic extraction despite much better retrieved files. This was
+  a latency/configuration failure, not a retrieval failure. Added deterministic
+  evidence composers for endpoint placement, request-to-database boundaries,
+  drawing transport, room persistence, disconnect cleanup, and scoring. Added
+  contributor guidance built from the analyzer's actual reading order rather
+  than whichever README section happened to match a word. Reduced model context
+  from 3,500 to 1,400 characters per source and capped generation at 220 tokens
+  so unusual questions have a better chance of completing locally.
+
+Final-batch interruption found during testing:
+  The first four responses in the ten-question rerun were relevant and fast,
+  but the fifth (project overview) returned HTTP 500. The new overview fast path
+  referenced the citations variable before it was initialized. Moved citation
+  construction above all deterministic branches and added a direct regression
+  test. Also improved contributor orientation to prefer README, detected entry
+  points, the React application, server entry point, room state, and data-store
+  boundaries before lower-value utility or training files.
+
+Structural chunking defect found while validating remaining questions:
+  `generic_chunks` treated indented JavaScript `const`, `let`, and `var`
+  declarations as new symbols. A function such as `removeSocket` was therefore
+  indexed only through the line before its first local variable (two lines in
+  Moodle), while its cleanup behavior was separated into unrelated symbol
+  chunks. Restricted the generic declaration matcher to top-level declarations.
+  The existing 100-line fallback windows continue covering long function bodies.
+  Added a regression test proving a local `const` no longer truncates its parent
+  function chunk.
+
+Logging note:
+  The first combined patch for the overview fix did not apply because its test
+  insertion anchor named a test that did not yet exist. No files were partially
+  changed by that failed patch. Reapplied the same changes with the correct
+  existing test anchor, then continued validation.
+
+Post-reindex remaining failures:
+  Regenerated the persisted Moodle analysis after the chunker repair; indexed
+  chunks dropped from 3,710 overly fragmented chunks to 1,451 larger structural
+  chunks. Authentication, database flow, endpoint placement, contributor files,
+  project purpose, room storage, disconnect behavior, and scoring then passed.
+  Drawing flow still lacked a server-side candidate because server broadcasts
+  contained drawing event names without the literal `room_message` token in the
+  same chunk. Subscription payments still matched a `processed` property in a
+  drawing type, causing two 60-second model timeouts and bad fallback answers.
+
+Final retrieval adjustment:
+  Server-index chunks containing drawing event names now qualify as drawing-
+  transport evidence even when the transport envelope token is in a neighboring
+  chunk. Payment questions now require at least one strong payment-domain term
+  in the evidence; generic verbs such as “processed” cannot satisfy the query.
+  Strengthened the payment regression fixture with that exact collision.
+
+Final self-test result:
+  Re-ran the complete ten-question set against the regenerated persisted Moodle
+  index. The supported questions now return relevant answers for authentication,
+  database boundaries, endpoint placement, contributor reading order, project
+  purpose, drawing transport, room persistence, disconnect cleanup, and scoring.
+  The intentionally unsupported subscription-payment question returns the
+  evidence refusal with zero citations. Typical deterministic latency was about
+  180–505 ms. No misleading fallback snippets remained in the final run.
+
+Browser-level verification:
+  Claimed the existing localhost:3000 RepoLens tab, entered the additional
+  question “What happens when a player disconnects?” in the visible Q&A field,
+  and clicked Ask. The rendered answer described disconnected-player marking,
+  voice/vote cleanup, host/drawer reassignment, and empty-room persistence, with
+  the single visible citation server/index.js:4570–4710. Browser error and
+  warning logs were empty.
+
+Final automated coverage:
+  Backend suite now contains 26 passing tests, including relevance, unsupported-
+  question refusal, exact citation validation, structural intent answers, and
+  JavaScript chunk-boundary regression cases. The final frontend production
+  build, ESLint run, and whitespace diff check also passed.
+
+Logging note:
+  The first attempt to append this final scorecard used a line-wrapped context
+  anchor that did not exactly match the log and therefore made no change. Read
+  the log tail, selected the exact existing anchor, and reapplied successfully.
+
+2026-08-09 — Product proposal for painful repository setup
+----------------------------------------------------------
+Problem statement:
+  Setup instructions alone do not prevent onboarding failures. Contributors can
+  still encounter missing environment variables, incompatible runtime versions,
+  lockfile/manifest drift, undocumented Redis or database requirements, occupied
+  ports, and operating-system-specific commands.
+
+Proposed RepoLens solution:
+  Add a “Setup readiness” report generated through static analysis. It should
+  inventory required runtimes and version constraints, identify the package
+  manager and canonical commands, extract environment-variable names without
+  reading or displaying secret values, classify external services as required
+  or optional, identify expected ports, flag platform-specific scripts, and
+  compare package manifests with lockfiles. Every claim should cite the exact
+  configuration or source file that established it.
+
+Output design:
+  Present a readiness status (Ready, Needs attention, or Blocked), followed by
+  blockers, warnings, optional enhancements, a copyable ordered setup sequence,
+  and exact remediation text. For Moodle, the report would explain that Node and
+  npm are required; PostgreSQL, Redis, and external AI providers are optional;
+  `.env.example` defines configuration; and the game retains fallback behavior
+  when optional services are absent.
+
+Safety boundary:
+  Keep the default diagnostic read-only so RepoLens maintains its “never executes
+  repository code” guarantee. A future sandboxed verification mode could run
+  install or health checks only after explicit opt-in, but that is a separate
+  capability and should not be implied by the static readiness report.
+
+2026-08-09 — Clickable setup issues
+-----------------------------------
+User request:
+  Add issues to the output and explain each issue when someone clicks it.
+
+Interaction design:
+  Added a main-column “Setup issues” panel with a Needs attention status and
+  four Moodle-specific findings. Each card states the detected issue and short
+  consequence. Clicking a card toggles an expanded explanation containing why
+  the issue matters, an ordered remediation plan, and exact source citations.
+  The buttons expose their expanded state to assistive technology and collapse
+  when clicked a second time. The two-column issue grid becomes one column on
+  small screens.
+
+Initial Moodle findings:
+  1. Node.js 22 is recommended but not pinned through package metadata or a
+     version file.
+  2. Optional AI credential placeholders look required in `.env.example`.
+  3. Redis and PostgreSQL are optional but materially change persistence and
+     reconnect behavior.
+  4. Local development requires separate frontend and API processes and ports.
+
+Evidence policy:
+  Findings cite README.md, package.json, and `.env.example`; RepoLens explains
+  only evidence visible in the repository and never reads secret values.
+
+Validation:
+  The frontend production build passed, ESLint passed, and the whitespace diff
+  check passed. No corrective iteration was required after the implementation.
+
+2026-08-09 — GitHub issues and pull requests
+--------------------------------------------
+User request:
+  Show whether a repository has GitHub issues or change requests, and explain
+  an item when the user clicks it. Interpreted “requests” as pull requests.
+
+API design:
+  Added a read-only GitHub activity adapter that requests the repository's open
+  issues endpoint, sorts by recent updates, and limits the response to twelve
+  items. GitHub returns pull requests through the issues endpoint with a
+  `pull_request` marker, so the adapter separates both types from one bounded
+  request. Public activity works anonymously; an optional read-only
+  `GITHUB_TOKEN` supports private repositories and higher rate limits. The token
+  is sent only to api.github.com and is never stored or returned to the browser.
+
+Failure behavior:
+  GitHub activity is supplemental. Network errors, permission failures, rate
+  limits, and private repositories return a structured unavailable state instead
+  of failing code analysis. The private/local Moodle example therefore states
+  that activity is unavailable and explains how to enable it, rather than
+  inventing issues or pull requests.
+
+Interface design:
+  Added “GitHub issues & pull requests” after Setup issues. Available results
+  show separate counts and accessible expandable rows. Clicking an item reveals
+  the author-provided description, author, updated date, comment count, labels,
+  draft status, and a safe GitHub link. Descriptions are rendered as plain text,
+  not executable HTML. Re-clicking collapses the item. Empty public repositories
+  receive a distinct no-open-activity state.
+
+Documentation and tests:
+  Added optional token documentation to `.env.example` and README. Added tests
+  that split issue and pull-request payloads, preserve explanations and draft
+  state, and confirm private-repository 404 responses remain nonfatal.
+
+Live connectivity diagnosis:
+  The first live adapter check against octocat/Hello-World returned the designed
+  unavailable state. A first diagnostic curl command also failed before making a
+  request because zsh interpreted the unquoted query-string characters as a
+  filename pattern. Retried with the URL quoted; GitHub returned HTTP 200 with
+  59 anonymous requests remaining. A direct Python diagnostic then exposed the
+  actual adapter problem: the local Python installation could not find a trusted
+  issuer through its system certificate store. Configured urllib with an
+  explicit certifi TLS context and pinned certifi in backend requirements. TLS
+  verification remains enabled; no insecure certificate bypass was introduced.
+
+Validation:
+  Backend suite: 28 tests passed. Frontend production build, ESLint, and
+  whitespace checks passed. The final live public check returned an available
+  result with one issue, two pull requests, and nonempty author explanations
+  from the first three recently updated octocat/Hello-World items. Restarted the
+  local API with the verified integration.
+
+2026-08-09 — Section order adjustment
+-------------------------------------
+User request:
+  Switch the positions of GitHub issues and Ask the repository.
+
+Change:
+  Moved Ask the repository directly after Setup issues and moved GitHub issues
+  & pull requests immediately after Q&A. Updated the visible indices so Ask is
+  05 and GitHub activity is 06; the sidebar continues at 07. Reordered the DOM,
+  rather than using CSS visual ordering, so keyboard and screen-reader traversal
+  matches the visible layout.
+
+Validation:
+  Ran the frontend production build (`npm run build`): passed. Ran ESLint
+  (`npm run lint`): passed with no warnings or errors. Ran `git diff --check`:
+  passed with no whitespace errors.
+
+2026-08-09 — Ask section visibility diagnosis
+---------------------------------------------
+User report:
+  The Ask part did not appear after switching the Ask and GitHub activity
+  sections.
+
+Initial idea and code check:
+  Interpreted "asl" as "Ask" from context. Inspected the results rendering in
+  `app/page.tsx`. Confirmed that Ask the repository is unconditional inside a
+  completed analysis, is indexed as 05, and precedes GitHub activity (06). It
+  intentionally does not appear on the pre-analysis landing state.
+
+Runtime checks and attempted diagnosis:
+  A sandboxed curl check could not reach localhost even though `lsof` showed the
+  project Node process listening on port 3000. Starting a second dev process was
+  therefore an unnecessary diagnostic attempt; it correctly detected port 3000
+  as occupied and selected 3001. Stopped that duplicate process immediately.
+  Retried the health check with local-network permission and received HTTP 200
+  from the original server on port 3000, proving it was healthy. The failed curl
+  result was caused by sandbox network isolation, not by a dead application.
+
+Browser verification:
+  Reloaded the existing RepoLens tab at localhost:3000 and inspected the rendered
+  accessibility tree. Confirmed section 05 contains the Ask heading, question
+  textbox, Ask button, and all four suggested questions. Confirmed section 06 is
+  GitHub issues & pull requests. The likely user-visible causes were a tab that
+  had not refreshed after the source change and the Ask panel being below the
+  long architecture and setup panels. No code fix was needed.
+
+2026-08-09 — Hero eyebrow removal
+---------------------------------
+User request:
+  Remove the selected “Production-grade codebase intelligence” label from the
+  hero section.
+
+Change:
+  Removed the eyebrow element, including its decorative sparkle icon, from
+  `app/page.tsx`. Removed the now-unused `.eyebrow` CSS rules so the stylesheet
+  does not retain dead presentation code. Kept the hero spacing and primary
+  headline unchanged.
+
+Validation:
+  Frontend production build passed. ESLint passed with no warnings or errors.
+  `git diff --check` passed with no whitespace errors.
+
+2026-08-09 — Recent commits and contributor focus
+-------------------------------------------------
+User request:
+  Add a section that examines recent commits and shows what people are working
+  on.
+
+Design and evidence:
+  Chose Git history as the primary evidence rather than inferring work only from
+  issue titles. The feature reads commit author, date, subject, and changed file
+  paths without checking out revisions or executing repository code. Inspected
+  the Moodle checkout's eight latest commits; they show a coherent ASL workstream
+  spanning game-chat integration, practice flows, gestures, diagnostics,
+  in-browser inference, model artifacts, training scripts, and tests.
+
+Backend implementation:
+  Added `backend/app/recent_work.py`. It parses a bounded `git log`, assigns
+  evidence-based focus areas from commit messages and changed paths, explains
+  each commit, and aggregates recent work by contributor. Failures are returned
+  as an unavailable state so repository analysis still succeeds. Public clones
+  now retain 12 commits instead of one, while preserving single-branch,
+  blob-filtered, no-tag, temporary, time-limited cloning. Added `recent_work` to
+  analysis records and connected it to public, fallback-local, and explicit
+  local analysis paths.
+
+Frontend implementation:
+  Added section 07, “What people are working on,” after GitHub issues and pull
+  requests. It shows contributor focus cards and expandable commits with hash,
+  title, author, date, affected-file count, inferred work areas, changed paths,
+  and a GitHub commit link. Added real Moodle example data from its local Git
+  history. Shifted the sidebar section numbers to 08–12. Added responsive and
+  keyboard-accessible button states.
+
+Documentation and tests:
+  Added parser and nonfatal-failure tests for recent work. Updated README to
+  explain recent-history collection and its non-execution security boundary.
+  Consulted GitHub's official REST commit documentation to confirm the standard
+  commit metadata shape and public commit URL conventions, although the final
+  implementation uses local Git metadata to work for private checkouts too.
+
+First validation failure and correction:
+  The initial recent-work unit test failed because Python's `splitlines()` treats
+  Git's unit-separator control character as a line boundary. That split every
+  metadata field into a separate line, so no record had the required five fields;
+  the live Moodle check correctly returned the nonfatal unavailable state for the
+  same reason. Replaced it with an LF-only split and an explicit space/tab/newline
+  trim so Git's control delimiters remain intact.
+
+Second validation failure and correction:
+  The LF-only change preserved each metadata row, but the parser still expected
+  five fields even though the selected Git format intentionally emits four:
+  commit hash, author, date, and subject. A minimal record inspection exposed the
+  exact four-element result. Corrected the field-count check and split limit to
+  four fields; no email address is collected or exposed.
+
+Final validation:
+  Backend suite passed: 30 tests. The live Moodle checkout returned status
+  `available`, eight commits, one contributor, the expected latest ASL/chat
+  commit, and a coherent contributor-focus summary. Frontend production build
+  passed. ESLint passed with no warnings or errors. `git diff --check` passed.
+  The existing backend uses file watching, so the new module is loaded by the
+  running local API without starting a duplicate server.
