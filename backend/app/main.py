@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 import time
 from dataclasses import fields
 
@@ -20,9 +21,11 @@ from .storage import load_payload, save_analysis, save_trace
 
 
 app = FastAPI(title="RepoLens API", version="0.1.0", description="Evidence-first GitHub repository intelligence")
+allowed_origins = [origin.strip() for origin in os.getenv("REPOLENS_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$" if not os.getenv("REPOLENS_ALLOWED_ORIGINS") else None,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],

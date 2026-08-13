@@ -198,11 +198,20 @@ function Icon({ name }: { name: "lens" | "github" | "arrow" | "check" | "file" |
   return <span aria-hidden="true" className={`icon icon-${name}`}>{glyphs[name]}</span>;
 }
 
+async function responseMessage(response: Response, fallback: string) {
+  try {
+    const payload = await response.json() as { detail?: string };
+    return payload.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function Home() {
-  const [url, setUrl] = useState("https://github.com/Sanjana-Gondariya/Moodle");
+  const [url, setUrl] = useState("");
   const [sourceMode, setSourceMode] = useState<"github" | "local">("github");
-  const [localPath, setLocalPath] = useState("/Users/shreyakb/Moodle");
-  const [analysis, setAnalysis] = useState<Analysis | null>(demo);
+  const [localPath, setLocalPath] = useState("");
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
@@ -213,7 +222,9 @@ export default function Home() {
   const [selectedHealthId, setSelectedHealthId] = useState<string | null>(null);
   const [selectedActivityKey, setSelectedActivityKey] = useState<string | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
-  const api = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const api = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+  const localAnalysisAvailable = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(api);
+  const isDemo = analysis?.id === demo.id;
 
   const languageTotal = useMemo(() => Object.values(analysis?.stats.languages || {}).reduce((a, b) => a + b, 0), [analysis]);
   const architectureNodeById = useMemo(() => Object.fromEntries((analysis?.architecture.nodes || []).map(node => [node.id, node])), [analysis]);
@@ -228,7 +239,7 @@ export default function Home() {
       const endpoint = sourceMode === "github" ? "/api/analyze" : "/api/analyze-local";
       const payload = sourceMode === "github" ? { url: sourceValue } : { path: sourceValue };
       const response = await fetch(`${api}${endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!response.ok) throw new Error((await response.json()).detail || "Analysis failed");
+      if (!response.ok) throw new Error(await responseMessage(response, response.status === 404 ? "The analysis service is not configured for this deployment." : "Repository analysis failed."));
       setAnalysis(await response.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reach the local analysis service.");
@@ -241,7 +252,7 @@ export default function Home() {
     setAsking(true); setAnswer(null);
     try {
       const response = await fetch(`${api}/api/repos/${analysis.id}/ask`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: question.trim() }) });
-      if (!response.ok) throw new Error((await response.json()).detail || "Question failed");
+      if (!response.ok) throw new Error(await responseMessage(response, "Could not answer that question."));
       setAnswer(await response.json());
     } catch (err) { setAnswer({ answer: err instanceof Error ? err.message : "Question failed.", citations: [] }); }
     finally { setAsking(false); }
@@ -251,24 +262,24 @@ export default function Home() {
     <main>
       <nav className="nav">
         <a className="brand" href="#top" aria-label="RepoLens home"><span className="brand-mark"><Icon name="lens" /></span> RepoLens</a>
-        <div className="nav-right"><span className="local-pill"><i /> Local-first</span><a className="github-link" href="https://github.com" target="_blank" rel="noreferrer"><Icon name="github" /> GitHub</a></div>
+        <div className="nav-right"><span className="local-pill"><i /> Evidence-first</span><a className="github-link" href="https://github.com/Shreyakb301/RepoLens" target="_blank" rel="noreferrer"><Icon name="github" /> View source</a></div>
       </nav>
 
       <section className={`hero ${analysis ? "hero-compact" : ""}`} id="top">
         <h1>Understand any codebase.<br /><span>Follow the evidence.</span></h1>
-        <p>Paste a public GitHub repository or use a local checkout. RepoLens maps the architecture, finds the important files, and explains how everything connects—with citations you can verify.</p>
-        <div className="source-tabs" role="group" aria-label="Repository source">
+        <p>Paste a public GitHub repository. RepoLens maps the architecture, finds the important files, and explains how everything connects—with citations you can verify.</p>
+        {localAnalysisAvailable && <div className="source-tabs" role="group" aria-label="Repository source">
           <button className={sourceMode === "github" ? "active" : ""} onClick={() => { setSourceMode("github"); setError(""); }}>GitHub URL</button>
           <button className={sourceMode === "local" ? "active" : ""} onClick={() => { setSourceMode("local"); setError(""); }}>Local folder</button>
-        </div>
+        </div>}
         <form className="analyze-form" onSubmit={analyze}>
           {sourceMode === "github" ?
-            <label className="url-field"><Icon name="github" /><input aria-label="Public GitHub repository URL" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/owner/repository" /></label> :
-            <label className="url-field"><Icon name="file" /><input aria-label="Local Git repository path" value={localPath} onChange={e => setLocalPath(e.target.value)} placeholder="/Users/you/projects/repository" /></label>}
-          <button disabled={loading}>{loading ? <><span className="spinner" /> Analyzing</> : <>Analyze repository <Icon name="arrow" /></>}</button>
+            <label className="url-field"><Icon name="github" /><input type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} required pattern="https://github\.com/[^/]+/[^/]+/?" aria-label="Public GitHub repository URL" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/owner/repository" /></label> :
+            <label className="url-field"><Icon name="file" /><input autoCapitalize="none" autoCorrect="off" spellCheck={false} required aria-label="Local Git repository path" value={localPath} onChange={e => setLocalPath(e.target.value)} placeholder="/Users/you/projects/repository" /></label>}
+          <button disabled={loading || !(sourceMode === "github" ? url.trim() : localPath.trim())}>{loading ? <><span className="spinner" /> Analyzing</> : <>Analyze repository <Icon name="arrow" /></>}</button>
         </form>
-        <div className="trust-row"><span><Icon name="check" /> {sourceMode === "github" ? "Public repositories" : "Code stays local"}</span><span><Icon name="check" /> Never executes repository code</span><span><Icon name="check" /> Local AI with Ollama</span></div>
-        {error && <div className="error"><strong>Analysis couldn’t start.</strong> {error} {sourceMode === "github" && <button onClick={() => { setSourceMode("local"); setError(""); }}>Use local checkout</button>}</div>}
+        <div className="trust-row"><span><Icon name="check" /> {sourceMode === "github" ? "Public repositories" : "Code stays local"}</span><span><Icon name="check" /> Never executes repository code</span><span><Icon name="check" /> Every answer cites source lines</span></div>
+        {error && <div className="error" role="alert"><strong>Analysis couldn’t start.</strong> {error} {sourceMode === "github" && localAnalysisAvailable && <button onClick={() => { setSourceMode("local"); setError(""); }}>Use local checkout</button>}</div>}
       </section>
 
       {!analysis && !loading && <section className="preview-section">
@@ -281,7 +292,7 @@ export default function Home() {
         <button className="demo-button" onClick={() => setAnalysis(demo)}>Explore the interactive demo <Icon name="arrow" /></button>
       </section>}
 
-      {loading && <section className="loading-panel">
+      {loading && <section className="loading-panel" role="status" aria-live="polite">
         <div className="radar"><span /><span /><span /></div>
         <h2>Reading the repository</h2><p>Filtering files, detecting the stack, mapping symbols, and building the search index…</p>
         <div className="loading-steps"><span className="done">Repository secured</span><span className="active">Parsing code structure</span><span>Building retrieval index</span></div>
@@ -289,7 +300,7 @@ export default function Home() {
 
       {analysis && <section className="results">
         <header className="repo-header">
-          <div><div className="repo-kicker"><Icon name="github" /> {analysis.repo.owner} / <span className="example-pill">Moodle example output</span></div><h2>{analysis.repo.name}</h2><p>{analysis.summary}</p></div>
+          <div><div className="repo-kicker"><Icon name="github" /> {analysis.repo.owner} / {isDemo && <span className="example-pill">Interactive demo</span>}</div><h2>{analysis.repo.name}</h2><p>{analysis.summary}</p></div>
           <div className="repo-meta"><span><strong>{analysis.stats.files}</strong> files</span><span><strong>{analysis.stats.lines.toLocaleString()}</strong> lines</span><span><strong>{(analysis.elapsed_ms / 1000).toFixed(1)}s</strong> indexed</span>{analysis.repo_health && <a className="health-jump" href="#repo-health">Health {analysis.repo_health.score}/100 ↓</a>}</div>
         </header>
 
@@ -369,7 +380,7 @@ export default function Home() {
                 <span>You could ask questions like:</span>
                 <div className="suggestions">{repositoryQuestions.map(q => <button type="button" key={q} onClick={() => setQuestion(q)}>“{q}”</button>)}</div>
               </div>
-              {answer && <div className="answer"><div className="answer-label"><Icon name="spark" /> Grounded answer</div><p>{answer.answer}</p><div className="answer-citations">{answer.citations.map((c, i) => <Citation key={i} citation={c} />)}</div></div>}
+              {answer && <div className="answer" aria-live="polite"><div className="answer-label"><Icon name="spark" /> Grounded answer</div><p>{answer.answer}</p><div className="answer-citations">{answer.citations.map((c, i) => <Citation key={i} citation={c} />)}</div></div>}
             </article>
 
             {analysis.github_activity && <article className="panel activity-panel">
