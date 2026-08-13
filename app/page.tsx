@@ -223,6 +223,7 @@ export default function Home() {
   const [selectedActivityKey, setSelectedActivityKey] = useState<string | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
   const api = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+  const liveAnalysisAvailable = Boolean(api);
   const localAnalysisAvailable = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(api);
   const isDemo = analysis?.id === demo.id;
 
@@ -272,12 +273,12 @@ export default function Home() {
           <button className={sourceMode === "github" ? "active" : ""} onClick={() => { setSourceMode("github"); setError(""); }}>GitHub URL</button>
           <button className={sourceMode === "local" ? "active" : ""} onClick={() => { setSourceMode("local"); setError(""); }}>Local folder</button>
         </div>}
-        <form className="analyze-form" onSubmit={analyze}>
+        {liveAnalysisAvailable ? <form className="analyze-form" onSubmit={analyze}>
           {sourceMode === "github" ?
             <label className="url-field"><Icon name="github" /><input type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} required pattern="https://github\.com/[^/]+/[^/]+/?" aria-label="Public GitHub repository URL" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/owner/repository" /></label> :
             <label className="url-field"><Icon name="file" /><input autoCapitalize="none" autoCorrect="off" spellCheck={false} required aria-label="Local Git repository path" value={localPath} onChange={e => setLocalPath(e.target.value)} placeholder="/Users/you/projects/repository" /></label>}
           <button disabled={loading || !(sourceMode === "github" ? url.trim() : localPath.trim())}>{loading ? <><span className="spinner" /> Analyzing</> : <>Analyze repository <Icon name="arrow" /></>}</button>
-        </form>
+        </form> : <div className="hero-actions"><button onClick={() => setAnalysis(demo)}>Explore the interactive demo <Icon name="arrow" /></button><a href="https://github.com/Shreyakb301/RepoLens#run-locally" target="_blank" rel="noreferrer">Run the analyzer locally ↗</a></div>}
         <div className="trust-row"><span><Icon name="check" /> {sourceMode === "github" ? "Public repositories" : "Code stays local"}</span><span><Icon name="check" /> Never executes repository code</span><span><Icon name="check" /> Every answer cites source lines</span></div>
         {error && <div className="error" role="alert"><strong>Analysis couldn’t start.</strong> {error} {sourceMode === "github" && localAnalysisAvailable && <button onClick={() => { setSourceMode("local"); setError(""); }}>Use local checkout</button>}</div>}
       </section>
