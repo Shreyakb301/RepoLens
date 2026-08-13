@@ -30,8 +30,8 @@ test("server-renders the RepoLens product landing page", async () => {
   const html = await response.text();
   assert.match(html, /<title>RepoLens — Codebase Intelligence<\/title>/i);
   assert.match(html, /Understand any codebase/);
-  assert.match(html, /Run the analyzer locally/);
-  assert.match(html, /Explore the interactive demo/);
+  assert.match(html, /Analyze repository/);
+  assert.doesNotMatch(html, /Explore the interactive demo|Run the analyzer locally/);
   assert.match(html, /https:\/\/github\.com\/Shreyakb301\/RepoLens/);
   assert.doesNotMatch(html, /Your site is taking shape|codex-preview|react-loading-skeleton/i);
 });
