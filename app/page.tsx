@@ -396,28 +396,31 @@ export default function Home() {
               </>}
             </article>}
 
-            {analysis.recent_work && <article className="panel recent-work-panel">
-              <div className="panel-heading"><div><span className="panel-index">08</span><h3>What people are working on</h3></div>{analysis.recent_work.status === "available" && <span className="activity-counts"><b>{analysis.recent_work.commits.length}</b> recent commits · <b>{analysis.recent_work.contributors.length}</b> contributor{analysis.recent_work.contributors.length === 1 ? "" : "s"}</span>}</div>
-              {analysis.recent_work.status === "unavailable" ? <div className="activity-unavailable"><span>Recent work unavailable</span><p>{analysis.recent_work.reason}</p><small>RepoLens reads commit metadata and changed file paths; it never executes repository code.</small></div> : <>
-                <p className="activity-intro">RepoLens uses recent commit messages and changed files to summarize each contributor’s current areas of work.</p>
-                <div className="contributor-focus">{analysis.recent_work.contributors.map(contributor => <div key={contributor.name}><span>{contributor.name.slice(0, 1).toUpperCase()}</span><div><strong>{contributor.name}</strong><p>{contributor.summary}</p><small>{contributor.areas.join(" · ")}</small></div></div>)}</div>
-                <div className="commit-list">{analysis.recent_work.commits.map(commit => {
-                  const expanded = selectedCommitSha === commit.sha;
-                  return <button type="button" key={commit.sha} className={`commit-item ${expanded ? "selected" : ""}`} aria-expanded={expanded} aria-controls={`commit-detail-${commit.short_sha}`} onClick={() => setSelectedCommitSha(expanded ? null : commit.sha)}>
-                    <code>{commit.short_sha}</code><div><strong>{commit.title}</strong><small>{commit.author} · {commit.date ? new Date(commit.date).toLocaleDateString() : "Date unavailable"} · {commit.file_count} file{commit.file_count === 1 ? "" : "s"}</small></div><b>{expanded ? "↑" : "→"}</b>
-                  </button>;
-                })}</div>
-                {analysis.recent_work.commits.map(commit => selectedCommitSha === commit.sha && <div className="commit-detail" id={`commit-detail-${commit.short_sha}`} key={commit.sha}>
-                  <span>Evidence-backed work summary</span><h4>{commit.title}</h4><p>{commit.explanation}</p>
-                  <div className="commit-areas">{commit.areas.map(area => <span key={area}>{area}</span>)}</div>
-                  {commit.files.length > 0 && <div className="changed-files"><strong>Changed files</strong>{commit.files.map(file => <code key={file}>{file}</code>)}</div>}
-                  {commit.url && <a href={commit.url} target="_blank" rel="noreferrer">Open commit on GitHub ↗</a>}
-                </div>)}
-              </>}
-            </article>}
           </div>
 
           <aside className="side-column">
+            {analysis.recent_work && <article className="panel side-panel recent-work-panel">
+              <div className="panel-heading"><div><span className="panel-index">08</span><h3>What people are working on</h3></div></div>
+              {analysis.recent_work.status === "unavailable" ? <div className="activity-unavailable"><span>Recent work unavailable</span><p>{analysis.recent_work.reason}</p><small>RepoLens reads commit metadata and changed file paths; it never executes repository code.</small></div> : <>
+                <div className="recent-work-counts"><span><b>{analysis.recent_work.commits.length}</b> commits</span><span><b>{analysis.recent_work.contributors.length}</b> contributor{analysis.recent_work.contributors.length === 1 ? "" : "s"}</span></div>
+                <p className="activity-intro">Recent commit messages and changed files reveal each contributor’s current focus.</p>
+                <div className="contributor-focus">{analysis.recent_work.contributors.map(contributor => <div key={contributor.name}><span>{contributor.name.slice(0, 1).toUpperCase()}</span><div><strong>{contributor.name}</strong><p>{contributor.summary}</p><small>{contributor.areas.join(" · ")}</small></div></div>)}</div>
+                <div className="commit-list">{analysis.recent_work.commits.map(commit => {
+                  const expanded = selectedCommitSha === commit.sha;
+                  return <div className={`commit-group ${expanded ? "selected" : ""}`} key={commit.sha}>
+                    <button type="button" className="commit-item" aria-expanded={expanded} aria-controls={`commit-detail-${commit.short_sha}`} onClick={() => setSelectedCommitSha(expanded ? null : commit.sha)}>
+                      <code>{commit.short_sha}</code><div><strong>{commit.title}</strong><small>{commit.author} · {commit.date ? new Date(commit.date).toLocaleDateString() : "Date unavailable"} · {commit.file_count} file{commit.file_count === 1 ? "" : "s"}</small></div><b>{expanded ? "↑" : "↓"}</b>
+                    </button>
+                    {expanded && <div className="commit-detail" id={`commit-detail-${commit.short_sha}`}>
+                      <span>Work summary</span><h4>{commit.title}</h4><p>{commit.explanation}</p>
+                      <div className="commit-areas">{commit.areas.map(area => <span key={area}>{area}</span>)}</div>
+                      {commit.files.length > 0 && <div className="changed-files"><strong>Changed files</strong>{commit.files.map(file => <code key={file}>{file}</code>)}</div>}
+                      {commit.url && <a href={commit.url} target="_blank" rel="noreferrer">Open commit on GitHub ↗</a>}
+                    </div>}
+                  </div>;
+                })}</div>
+              </>}
+            </article>}
             <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">09</span><h3>Reading order</h3></div></div><ol className="reading-list">{analysis.reading_order.slice(0, 7).map((file, i) => <li key={file.path}><span>{String(i + 1).padStart(2, "0")}</span><div><code>{file.path}</code><p>{file.summary}</p></div></li>)}</ol></article>
             {analysis.key_concepts && <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">10</span><h3>Key concepts</h3></div></div><div className="concept-list">{analysis.key_concepts.map(item => <div key={item.title}><strong>{item.title}</strong><p>{item.detail}</p><Citation citation={item.citation} /></div>)}</div></article>}
             <article className="panel side-panel"><div className="panel-heading"><div><span className="panel-index">11</span><h3>Interfaces & events</h3></div></div><div className="route-list">{analysis.routes.length ? analysis.routes.slice(0, 8).map((route, i) => <div key={i}><span className={`method method-${route.method.toLowerCase()}`}>{route.method}</span><div><code>{route.path}</code><small>{route.handler}</small></div></div>) : <p className="empty-state">No public interfaces detected.</p>}</div></article>
