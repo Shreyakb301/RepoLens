@@ -5,8 +5,12 @@ import os
 import time
 from dataclasses import fields
 
-from fastapi import FastAPI, HTTPException
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .analyzer import analyze_repository
@@ -30,6 +34,21 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+SECURITY_HEADERS = {
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
 
 
 class AnalyzeRequest(BaseModel):
@@ -133,3 +152,22 @@ def analyze_local(request: LocalAnalyzeRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Local repository analysis failed safely. Check the service logs for details.") from exc
+
+
+# The Vite build writes the SPA here (see `vite.config.ts`). Mounting it last
+# keeps every `/api/*` route above ahead of the catch-all, so a single Render
+# service serves the frontend and the API from one origin.
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+INDEX_FILE = STATIC_DIR / "index.html"
+
+if INDEX_FILE.is_file():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = (STATIC_DIR / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(STATIC_DIR):
+            return FileResponse(candidate)
+        return FileResponse(INDEX_FILE)

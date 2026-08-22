@@ -19,10 +19,11 @@
 __pycache__/
 *.py[cod]
 
-# next.js
+# build output
 /.next/
 /.vinext/
 /out/
+/backend/static/
 
 # misc
 .DS_Store
@@ -43,6 +44,7 @@ yarn-error.log*
 
 # typescript
 next-env.d.ts
+tsconfig.tsbuildinfo
 /dist/
 /.wrangler/
 /outputs/
