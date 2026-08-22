@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: repolens
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      # The SPA and the API share one origin, so no cross-origin allowlist is
+      # needed. Set this only if another site must call the API directly.
+      - key: REPOLENS_ALLOWED_ORIGINS
+        sync: false
+      # Optional read-only token; raises the GitHub API rate limit.
+      - key: GITHUB_TOKEN
+        sync: false
