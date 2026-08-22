@@ -68,7 +68,10 @@ Start the frontend in another terminal:
 npm run dev
 ```
 
-Open the local URL printed by the frontend. If Ollama is not running, analysis and Q&A still work; answers use cited extractive evidence.
+Open the local URL printed by the frontend. The dev server proxies `/api` to the
+backend on port 8000, so the frontend uses the same same-origin paths it uses in
+production. If Ollama is not running, analysis and Q&A still work; answers use
+cited extractive evidence.
 
 For a private repository that already exists on your computer, choose **Local
 folder** in the interface. `REPOLENS_LOCAL_ROOTS` controls which directories the
@@ -94,13 +97,39 @@ checkout. It uses commit messages, authors, dates, and changed file paths to sho
 what contributors appear to be working on. This is static Git metadata analysis;
 repository code and hooks are never executed.
 
+## Deployment
+
+RepoLens deploys as a single service. `vite build` writes the SPA to
+`backend/static`, and the FastAPI app in `backend/app/main.py` serves it at `/`
+alongside `/api/*`. Frontend and API share one origin, so there is no proxy
+layer and no CORS allowlist to keep in sync.
+
+[`render.yaml`](render.yaml) defines the Render web service and
+[`Dockerfile`](Dockerfile) builds it: a Node stage compiles the SPA, and a
+Python stage installs the backend, copies the build in, and runs Uvicorn. `git`
+is installed in the runtime image because the analyzer shells out to it to clone
+the repositories it inspects.
+
+To deploy, point Render at the repository as a Blueprint; it reads
+`render.yaml` and builds from the Dockerfile. `GITHUB_TOKEN` is optional and
+declared with `sync: false`, so set it in the Render dashboard if you want the
+higher GitHub API rate limit.
+
+Build the production image locally with:
+
+```bash
+docker build -t repolens . && docker run --rm -p 8000:8000 repolens
+```
+
 ## Quality checks
 
 ```bash
 PYTHONPATH=backend pytest backend/tests -q
 PYTHONPATH=backend python backend/eval/run_eval.py --min-recall 0.80
-npm run build
+npm test
 ```
+
+`npm test` builds the SPA and asserts the build output.
 
 The evaluator reports Recall@3 and mean reciprocal rank. Run it once for the fallback and once with `REPOLENS_ML_ENABLED=1` when comparing retrieval configurations. Replace the small included fixture with 50–100 questions across known open-source repositories before publishing portfolio benchmark claims.
 
