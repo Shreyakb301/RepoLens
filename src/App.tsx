@@ -1,5 +1,3 @@
-"use client";
-
 import { FormEvent, useMemo, useState } from "react";
 
 type Citation = { path: string; start_line: number; end_line: number };
@@ -222,7 +220,7 @@ export default function Home() {
   const [selectedHealthId, setSelectedHealthId] = useState<string | null>(null);
   const [selectedActivityKey, setSelectedActivityKey] = useState<string | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
-  const api = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+  const api = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
   const localAnalysisAvailable = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(api);
   const isDemo = analysis?.id === demo.id;
 
